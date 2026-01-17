@@ -2,5 +2,7 @@
 *.gdf
 *.keras
 *.npy
+
 /data
 __pycache__
+.direnv
