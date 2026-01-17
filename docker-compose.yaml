@@ -1,0 +1,34 @@
+services:
+  tensorflow:
+    image: rocm/tensorflow:latest
+    container_name: "tensorflow-rocm"
+
+    devices:
+      - /dev/kfd
+      - /dev/dri
+
+    ipc: host
+    # shm_size: 10G
+
+    command: python /src/train_cnn.py /src/data/eeg2code/offline/VP2.mat /src/models/EEG2Code.keras
+
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 10G
+
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: 10.3.0
+      HSA_USE_SVM: 0
+
+    volumes:
+      - ./:/src
+
+    group_add:
+      - video
+
+    cap_add:
+      - SYS_PTRACE
+
+    security_opt:
+      - seccomp=unconfined

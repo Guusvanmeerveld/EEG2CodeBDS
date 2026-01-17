@@ -1,0 +1,6 @@
+*.mat
+*.gdf
+*.keras
+*.npy
+/data
+__pycache__
