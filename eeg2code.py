@@ -16,38 +16,32 @@ class EEG2CodeEstimator(BaseEstimator, ClassifierMixin):
     def predict(self, X):
         return self.model.predict(X, batch_size=128)
 
-def calculate_similarity_scores(X, y, V, model_file):
-    eeg2code_model = EEG2CodeEstimator(model_file)
+def calculate_similarity_scores(X, V, y, segment_count, eeg2code_model):
+    # eeg2code_model = EEG2CodeEstimator(model_file)
 
-    trial_count, _, _, _ = X.shape
+    trial_count, window_count, _, _ = X.shape
 
-    group_count = 15
+    segment_size = int(window_count / segment_count)
 
-    target_scores = np.full((trial_count, group_count), np.nan)
-    non_target_scores = np.full((trial_count * (y.shape[1] - 1), group_count), np.nan)
+    # print(segment_size)
 
-    # print(target_scores.shape, non_target_scores.shape)
+    target_scores = np.full((trial_count, segment_count), np.nan)
+    non_target_scores = np.full((trial_count * (V.shape[1] - 1), segment_count), np.nan)
 
-    for i, (trial, stimuli, label) in enumerate(zip(X, y, V)):
-        trial_split = np.array(np.split(trial, group_count))
-
+    for i, (trial, stimuli, label) in enumerate(zip(X, V, y)):
         print("Trial ", (i + 1))
 
-        if (i > 128):
-            break
+        for j in range(segment_count):
+            predicted_stimulus = eeg2code_model.predict(trial[:(segment_size * (j + 1))])
 
-        for j in range(len(trial_split)):
-            data_until_now = trial_split[:(j + 1)]
+            actual_stimulus = stimuli[:, :(predicted_stimulus.shape[0])]
 
-            data_flat = data_until_now.reshape(data_until_now.shape[0] * data_until_now.shape[1], data_until_now.shape[2], data_until_now.shape[3])
+            predicted_stimulus = 1 - np.argmax(predicted_stimulus, axis=1)
 
-            predicted_y = eeg2code_model.predict(data_flat)
+            similarity_scores = np.logical_xor(predicted_stimulus, actual_stimulus).sum(axis=1)
 
-            actual_y = stimuli[:, :(len(predicted_y))]
-
-            predicted_y = 1 - np.argmax(predicted_y, axis=1)
-
-            similarity_scores = np.logical_xor(predicted_y, actual_y).sum(axis=1)
+            if ((j + 1) == segment_count):
+                print(similarity_scores)
 
             target_scores[i, j] = similarity_scores[label]
 
@@ -65,17 +59,13 @@ def calculate_decision_boundary(target_mean, non_target_mean, target_std, non_ta
 
     return eta
 
-def calculate_bds_values(X, y, V, model_file = "models/EEG2Code.keras", windowed_data_dir = "data/eeg2code/windowed"):
-    windowSize = 150
+def calculate_bds_values(X, V, y, segment_count, window_size, model):
+    # This function loses 1 window of data at the end of the trial because of how it functions.
+    X = utils.split_data_to_windows(X, window_size=window_size)
 
-    X = utils.split_data_to_windows(X, windowSize=windowSize)
+    target_scores, non_target_scores = calculate_similarity_scores(X, V, y, segment_count, model)
 
-    target_scores, non_target_scores = calculate_similarity_scores(X, y, V, model_file)
-
-    # print("Target scores shape: ", target_scores.shape)
-    # print("Non target scores shape: ", non_target_scores.shape)
-
-    n_classes = y.shape[1]
+    n_classes = V.shape[1]
 
     target_mean = np.nanmean(target_scores, axis=0)
     non_target_mean = np.nanmean(non_target_scores, axis=0)
@@ -84,10 +74,13 @@ def calculate_bds_values(X, y, V, model_file = "models/EEG2Code.keras", windowed
 
     size = target_mean.shape[0]
 
+    normalizing_factor = non_target_mean
+
     # Normalize both distributions to the non target distribution.
-    target_mean = target_mean - non_target_mean
-    non_target_mean = non_target_mean - non_target_mean
+    target_mean = target_mean - normalizing_factor
+    non_target_mean = non_target_mean - normalizing_factor
 
     decision_boundary = calculate_decision_boundary(target_mean, non_target_mean, target_std, non_target_std, n_classes)
 
-    return target_mean, non_target_mean, target_std, non_target_std, decision_boundary
+    return target_mean, non_target_mean, target_std, non_target_std, decision_boundary, normalizing_factor
+    

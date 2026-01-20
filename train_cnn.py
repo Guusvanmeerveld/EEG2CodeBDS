@@ -58,9 +58,7 @@ def construct_model(windowSize, numberChannels, lr=0.001):
 
 print("Loading dataset")
 
-X, y, _, _, V = utils.load_offline_eeg2code_dataset(MATLAB_FILE)
-
-print("Splitting validation data")
+(X, V, y), _, stimulation_time, fs, fr = utils.load_nagelspuler_dataset(MATLAB_FILE)
 
 print("Splitting data to windows")
 
@@ -70,10 +68,10 @@ X = utils.split_data_to_windows(X)
 X = X.reshape(X.shape[0] * X.shape[1], X.shape[2], X.shape[3])
 
 # Pick all the of the target stimuli, lose the last 150 samples and flatten.
-y = y[np.arange(y.shape[0]), V["train"], :-150].flatten()
+V = V[np.arange(V.shape[0]), y, :-150].flatten()
 
 # Turn every 0 into [1, 0] and every 1 into [0, 1]
-y = np.column_stack((1 - y, y))
+V = np.column_stack((V, 1 - V))
 
 print(y.shape, X.shape)
 
@@ -81,4 +79,4 @@ print("Data splitting done, constructing model")
 
 model = construct_model(X.shape[1], X.shape[2])
 
-model.fit(X, y, validation_split=0.2, batch_size=256, epochs=25, callbacks = [keras.callbacks.ModelCheckpoint(MODEL_FILE, monitor='val_loss', verbose=0, save_best_only=True, save_weights_only=False, mode='auto')])
+model.fit(X, V, validation_split=0.2, batch_size=256, epochs=25, callbacks = [keras.callbacks.ModelCheckpoint(MODEL_FILE, monitor='val_loss', verbose=0, save_best_only=True, save_weights_only=False, mode='auto')])
