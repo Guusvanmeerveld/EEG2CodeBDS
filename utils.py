@@ -8,27 +8,32 @@ import keras
 # import mne
 # import pyntbci
 
-
-def load_nagelspuler_dataset(file_name):
-	data = sio.loadmat(file_name)
-
+def load_nagelspuler_dataset(data_file):
 	stimulation_time = {}
 
 	stimulation_time["train"] = 5
 	stimulation_time["test"] = 2
+	
+	inter_trial_time = {}
+	inter_trial_time["test"] = 0.5
+
+	data = sio.loadmat(data_file)
 
 	X_train = np.array(data['train_data_x_' + str(stimulation_time["train"]) + 's'])
 	V_train = np.array(data['train_data_y_' + str(stimulation_time["train"]) + 's'])
 	X_test = np.array(data['test_data_x'])
 	V_test = np.array(data['test_data_y'])
-	fs = 600
-	fr = 60
+
+	train_trials = 32
 
 	test_trials = 32
 	test_trials_repeat = 14
 
+	y_train = np.arange(train_trials)
 	y_test = np.tile(np.arange(test_trials), test_trials_repeat)
-	y_train = np.arange(V_train.shape[0])
+
+	fs = 600
+	fr = 60
 
 	print("EEG2Code dataset:")
 	print("| X (train): ", X_train.shape, "(trials x channels x samples)")  # EEG
@@ -38,7 +43,7 @@ def load_nagelspuler_dataset(file_name):
 	print("| fs: ", fs, "Hz")  # sampling frequency
 	print("| fr: ", fr, "Hz")  # presentation rate
 
-	return ((X_train, V_train, y_train), (X_test, V_test, y_test), stimulation_time, fs, fr)
+	return ((X_train, V_train, y_train), (X_test, V_test, y_test), stimulation_time, inter_trial_time, fs, fr)
 
 def load_thielen_dataset(data_path):
 

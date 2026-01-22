@@ -10,7 +10,7 @@ services:
     ipc: host
     # shm_size: 10G
 
-    command: python /src/train_cnn.py /src/data/nagelspuler/offline/VP2.mat /src/models/EEG2Code.keras
+    command: python /src/train_cnn.py /src/data/nagelspuler/offline /src/models
 
     # deploy:
     #   resources:
