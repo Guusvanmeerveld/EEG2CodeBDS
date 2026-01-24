@@ -56,107 +56,69 @@ def plot_dist_param(b0_, b1_, s0_, s1_, eta_, time_intervals, label):
     plt.plot(pdf_nt_x, eta, color=nontarget_color)
     plt.xlim(time_intervals[0], x0 + width)
 
-(X_train, V_train, y_train), (X_test, V_test, y_test), trial_time, fs, fr = utils.load_nagelspuler_dataset("data/nagelspuler/offline/VP2.mat")
-
-# (X_train, V_train, y_train), (X_test, V_test, y_test), trial_time, fr, fs = utils.load_thielen_dataset("data/thielen2015")
-
 # 250 ms segments for BDS
 segment_time = 0.125
 
-n_test_segments = int(trial_time["test"] / segment_time)
-n_train_segments = int(trial_time["train"] / segment_time)
-
-# print("Calculating BDS values for EEG2Code")
-
-# target_mean, non_target_mean, target_std, non_target_std, decision_boundary = eeg2code.calculate_bds_values(X_train, V_train, y_train, n_train_segments)
-
-# plot_dist_param(non_target_mean, target_mean, non_target_std, target_std, decision_boundary,  np.linspace(0, trial_time["train"], num=target_mean.shape[0]), "EEG2Code")
-
 print("Performing BDS test for EEG2Code")
 
-def eeg2code_bds_test():
-    eeg2code_model = eeg2code.EEG2CodeEstimator("models/EEG2Code.keras")
+subjects = 9
 
-    X_tst, X_trn = np.split(X_test, 2)
-    V_tst, V_trn = np.split(V_test, 2)
-    y_tst, y_trn = np.split(y_test, 2)
+# for cost_ratio in np.logspace(-4, 4, num=9):
+segment_count = 14
+
+target_mean_sub = np.zeros((subjects, segment_count))
+non_target_mean_sub = np.zeros((subjects, segment_count))
+target_std_sub = np.zeros((subjects, segment_count))
+non_target_std_sub = np.zeros((subjects, segment_count))
+decision_boundary_sub = np.zeros((subjects, segment_count))
+
+for subject in range(subjects):
+    (X_train, V_train, y_train), (X_test, V_test, y_test), trial_time, inter_trial_time, fs, fr = utils.load_nagelspuler_dataset("data/nagelspuler/offline/VP" + str(subject + 1) + ".mat")
+
+    eeg2code_model = eeg2code.EEG2CodeEstimator("models/EEG2Code" + str(subject + 1) + ".keras")
 
     window_size = 150
 
-    segment_count = n_test_segments
+    target_mean, non_target_mean, target_std, non_target_std, decision_boundary, normalizing_factor = eeg2code.calculate_bds_params(X_test, V_test, y_test, segment_count, window_size, eeg2code_model, 1.0)
 
-    assert ((window_size / fs) % segment_time == 0)
+    target_mean_sub[subject] = target_mean
+    non_target_mean_sub[subject] = non_target_mean
+    target_std_sub[subject] = target_std
+    non_target_std_sub[subject] = non_target_std
+    decision_boundary_sub[subject] = decision_boundary
 
-    segment_count -= int((window_size / fs) / segment_time)
+np.savez("data/bds_calibration_normalized.npz", target_mean=target_mean_sub, non_target_mean=non_target_mean_sub, target_std=target_std_sub, non_target_std=non_target_std_sub, decision_boundary=decision_boundary_sub)
 
-    target_mean, non_target_mean, target_std, non_target_std, decision_boundary, normalizing_factor = eeg2code.calculate_bds_values(X_trn, V_trn, y_trn, segment_count, window_size, eeg2code_model)
+# plot_dist_param(np.mean(non_target_mean_sub, axis=0), np.mean(target_mean_sub, axis=0), np.mean(non_target_std_sub, axis=0), np.mean(target_std_sub, axis=0), np.mean(decision_boundary_sub, axis=0),  np.linspace(0, segment_count, num=target_mean.shape[0]), "EEG2Code")
 
-    plot_dist_param(non_target_mean, target_mean, non_target_std, target_std, decision_boundary,  np.linspace(0, segment_count * segment_time, num=target_mean.shape[0]), "EEG2Code")
 
-    plt.xlabel('stimulation time (s)')
-    plt.ylabel('similarity score')
-    plt.grid(True, alpha=0.4)
-    plt.legend(loc='upper left')
+save_path = "data/bds_test/"
 
-    plt.tight_layout()
-    plt.show()
+for cost_ratio in np.logspace(-4, 4, num=9):
+    for subject in range(subjects):
+        predicted, duration, n_classes = eeg2code.bds_performance_test(subject, cost_ratio, segment_time)
 
-    X_tst = utils.split_data_to_windows(X_tst, window_size=window_size)
+        np.save(save_path + "predicted-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy", predicted)
+        np.save(save_path + "duration-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy", duration)
+        np.save(save_path + "n_classes-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy", n_classes)
 
-    window_count = X_tst.shape[1]
 
-    segment_size = int(window_count / segment_count)
 
-    # print(segment_size)
+# # Compute ITR
+# itr_bds0 = pyntbci.utilities.itr(n_classes, accuracy_tst, dur_tst + inter_trial_time["test"])
 
-    predicted_test = np.zeros((V_tst.shape[0]))
-    dur_test = np.zeros((V_tst.shape[0]))
+# fig, ax = plt.subplots(3, 1, figsize=(15, 8), sharex=True)
+# ax[0].bar(np.arange(n_folds), accuracy_tst)
+# ax[0].hlines(np.mean(accuracy_tst), -.5, n_folds - 0.5, linestyle='--', color="k", alpha=0.5)
+# ax[1].bar(np.arange(n_folds), dur_tst)
+# ax[1].hlines(np.mean(dur_tst), -.5, n_folds - 0.5, linestyle='--', color="k", alpha=0.5)
+# ax[2].bar(np.arange(n_folds), itr_bds0)
+# ax[2].hlines(np.mean(itr_bds0), -.5, n_folds - 0.5, linestyle='--', color="k", alpha=0.5)
+# ax[2].set_xlabel("(test) fold")
+# ax[0].set_ylabel("accuracy")
+# ax[1].set_ylabel("duration [s]")
+# ax[2].set_ylabel("itr [bits/min]")
+# ax[0].set_title(f"BDS0 dynamic stopping: avg acc {accuracy_tst.mean():.2f} | " +
+#                 f"avg dur {dur_tst.mean():.2f} | avg itr {itr_bds0.mean():.1f}")
 
-    for i, (trial, stimuli, label) in enumerate(zip(X_tst, V_tst, y_tst)):
-        print("Trial ", (i + 1))
-
-        for j in range(segment_count):
-            predicted_stimulus = eeg2code_model.predict(trial[:(segment_size * (j + 1))])
-
-            actual_stimulus = stimuli[:, :(predicted_stimulus.shape[0])]
-
-            predicted_stimulus = 1 - np.argmax(predicted_stimulus, axis=1)
-
-            similarity_scores = np.logical_xor(predicted_stimulus, actual_stimulus).sum(axis=1)
-
-            # Normalize and also remove decision boundary, meaning anything higher than 0 passed the boundary
-            passing_scores = similarity_scores - normalizing_factor[j] - decision_boundary[j]
-
-            # If there are passing scores, we stop.
-            if (((passing_scores > 0).any()) or ((j + 1) == segment_count)):
-                dur_test[i] = (1 + j) * segment_time
-                # The highest value is the most likely to be the correct target, according to Amahdi et al (2023)
-                predicted_test[i] = np.argmax(passing_scores)
-                print("Predicted stimulus: ", np.argmax(passing_scores), "Actual stimulus: ", y_tst[i], " At timepoint: ", (1 + j) * segment_time)
-                break
-        
-
-    print("Accuracy: ", np.mean(predicted_test == y_tst))
-    print("Duration: ", np.mean(dur_test))
-
-    # Compute ITR
-    # itr_bds0 = pyntbci.utilities.itr(n_classes, accuracy_bds0, duration_bds0 + inter_trial_time)
-
-eeg2code_bds_test()
-# print("Calculating BDS values for rCCA")
-
-# V = y[np.arange(y.shape[0]), V]
-# y = np.arange(V.shape[0])
-# print(y.shape, V.shape)
-
-# target_mean, non_target_mean, target_std, non_target_std, decision_boundary = rcca.calculate_bds_values(X, y, V, stimulation_time["train"], 32)
-
-# plot_dist_param(non_target_mean, target_mean, non_target_std, target_std, decision_boundary,  np.linspace(0, stimulation_time["train"], num=target_mean.shape[0]), "RCCA")
-
-plt.xlabel('stimulation time (s)')
-plt.ylabel('similarity score')
-plt.grid(True, alpha=0.4)
-plt.legend(loc='upper left')
-
-plt.tight_layout()
-plt.show()
+# plt.show()
