@@ -15,6 +15,8 @@ import utils
 
 import tensorflow as tf
 
+from sklearn.metrics import precision_score, recall_score, confusion_matrix, accuracy_score, f1_score
+
 def construct_model(windowSize, numberChannels, lr=0.001):
 	model = Sequential([
 		Input(shape=(windowSize,numberChannels,1)),
@@ -54,8 +56,11 @@ print("TensorFlow version:", tf.__version__)
 
 subjects = 9
 
-accuracy_subjects = np.zeros((subjects))
-std_subjects = np.zeros((subjects))
+accuracy_subjects = np.zeros((2, subjects))
+precision_subjects = np.zeros((2, subjects))
+specificity_subjects = np.zeros((2, subjects))
+recall_subjects = np.zeros((2, subjects))
+f_score_subjects = np.zeros((2, subjects))
 
 for subject in range(subjects):
 	data_file = sys.argv[1] + "/VP" + str(subject + 1) + ".mat"
@@ -97,27 +102,82 @@ for subject in range(subjects):
 	y_folds = np.split(y_test, n_folds)
 
 	accuracy = np.zeros(n_folds)
+	precision = np.zeros(n_folds)
+	specificity = np.zeros(n_folds)
+	recall = np.zeros(n_folds)
+	f_score = np.zeros(n_folds)
 
-	for fold, (X_tst, V_tst) in enumerate(zip(X_folds, V_folds)):
+	for fold, (X_tst, true_V) in enumerate(zip(X_folds, V_folds)):
 		print("Making predictions for fold", fold + 1)
 
-		X_tst = X_tst.reshape(X_tst.shape[0] * X_tst.shape[1], X_tst.shape[2], X_tst.shape[3])
+		predicted_V = model.predict(np.vstack(X_tst), batch_size=256)
 
-		predicted_y = model.predict(X_tst, batch_size=256)
+		predicted_V = 1 - np.argmax(predicted_V, axis=1)
 
-		predicted_y = 1 - np.argmax(predicted_y, axis=1)
+		accuracy[fold] = accuracy_score(true_V, predicted_V)
+		precision[fold] = precision_score(true_V, predicted_V)
 
-		accuracy[fold] = np.mean(predicted_y == V_tst)
-		print("Accuracy: ", accuracy[fold])
+		tn, fp, fn, tp = confusion_matrix(true_V, predicted_V).ravel()
+		specificity[fold] = tn / (tn+fp)
+		
+		recall[fold] = recall_score(true_V, predicted_V)
+		f_score[fold] = f1_score(true_V, predicted_V)
+
+		print("Accuracy:", accuracy[fold], "Precision:", precision[fold], "Recall:", recall[fold], "F-score:", f_score[fold])
 	
-	accuracy_subjects[subject] = accuracy.mean()
-	std_subjects[subject] = accuracy.std()
+	accuracy_subjects[0, subject] = accuracy.mean()
+	accuracy_subjects[1, subject] = accuracy.std()
 
-fig, ax = plt.subplots(1, 1, figsize=(15, 8), sharex=True)
-ax.bar(np.arange(subjects), accuracy_subjects, yerr=std_subjects)
-ax.hlines(np.mean(accuracy_subjects), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
-ax.set_xlabel("subject")
-ax.set_ylabel("accuracy")
-ax.set_title(f"EEG2Code stimulus generation: average accuracy {accuracy_subjects.mean():.2f} & standard deviation {accuracy_subjects.std():.2f}")
+	precision_subjects[0, subject] = precision.mean()
+	precision_subjects[1, subject] = precision.std()
+
+	specificity_subjects[0, subject] = specificity.mean()
+	specificity_subjects[1, subject] = specificity.std()
+
+	recall_subjects[0, subject] = recall.mean()
+	recall_subjects[1, subject] = recall.std()
+
+	f_score_subjects[0, subject] = f_score.mean()
+	f_score_subjects[1, subject] = f_score.std()
+
+fig, ax = plt.subplots(5, 1, figsize=(15, 12), sharex=True, constrained_layout=True)
+ax[0].bar(np.arange(subjects), accuracy_subjects[0], yerr=accuracy_subjects[1])
+ax[0].hlines(np.mean(accuracy_subjects[0]), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
+ax[0].set_ylim(0.5, 1)
+ax[0].set_xlabel("subject")
+ax[0].set_ylabel("accuracy")
+ax[0].set_title(f"Average accuracy {accuracy_subjects[0].mean():.2f} with standard deviation {accuracy_subjects[0].std():.2f}")
+
+ax[1].bar(np.arange(subjects), precision_subjects[0], yerr=precision_subjects[1])
+ax[1].hlines(np.mean(precision_subjects[0]), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
+ax[1].set_ylim(0.5, 1)
+ax[1].set_xticks(np.arange(subjects), np.arange(subjects) + 1)
+ax[1].set_xlabel("subject")
+ax[1].set_ylabel("precision")
+ax[1].set_title(f"Average precision {precision_subjects[0].mean():.2f} with standard deviation {precision_subjects[0].std():.2f}")
+
+ax[2].bar(np.arange(subjects), recall_subjects[0], yerr=recall_subjects[1])
+ax[2].hlines(np.mean(recall_subjects[0]), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
+ax[2].set_ylim(0.5, 1)
+ax[2].set_xticks(np.arange(subjects), np.arange(subjects) + 1)
+ax[2].set_xlabel("subject")
+ax[2].set_ylabel("recall")
+ax[2].set_title(f"Average recall {recall_subjects[0].mean():.2f} with standard deviation {recall_subjects[0].std():.2f}")
+
+ax[3].bar(np.arange(subjects), f_score_subjects[0], yerr=f_score_subjects[1])
+ax[3].hlines(np.mean(f_score_subjects[0]), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
+ax[3].set_xticks(np.arange(subjects), np.arange(subjects) + 1)
+ax[3].set_ylim(0.5, 1)
+ax[3].set_xlabel("subject")
+ax[3].set_ylabel("f-score")
+ax[3].set_title(f"Average f-score {f_score_subjects[0].mean():.2f} with standard deviation {f_score_subjects[0].std():.2f}")
+
+ax[4].bar(np.arange(subjects), specificity_subjects[0], yerr=specificity_subjects[1])
+ax[4].hlines(np.mean(specificity_subjects[0]), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
+ax[4].set_xticks(np.arange(subjects), np.arange(subjects) + 1)
+ax[4].set_ylim(0.5, 1)
+ax[4].set_xlabel("subject")
+ax[4].set_ylabel("specificity")
+ax[4].set_title(f"Average specificity {specificity_subjects[0].mean():.2f} with standard deviation {specificity_subjects[0].std():.2f}")
 
 plt.show()
