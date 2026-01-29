@@ -143,6 +143,7 @@ for subject in range(subjects):
 fig, ax = plt.subplots(5, 1, figsize=(15, 12), sharex=True, constrained_layout=True)
 ax[0].bar(np.arange(subjects), accuracy_subjects[0], yerr=accuracy_subjects[1])
 ax[0].hlines(np.mean(accuracy_subjects[0]), -.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
+ax[0].hlines(0.749, -.5, subjects - 0.5, linestyle='--', label="Nagel & Spuler average accuracy", color="red", alpha=0.5)
 ax[0].set_ylim(0.5, 1)
 ax[0].set_xlabel("subject")
 ax[0].set_ylabel("accuracy")

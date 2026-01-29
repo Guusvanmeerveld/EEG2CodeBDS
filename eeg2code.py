@@ -154,12 +154,8 @@ def bds_performance_test(subject, cost_ratio, segment_time):
                     # The highest value is the most likely to be the correct target, according to Amahdi et al (2023)
                     predicted_tst[fold, i] = np.argmax(passing_scores)
                     break
-    
-    dur_tst = dur_tst.mean(axis=1)
 
-    n_classes = V_test.shape[1]
-
-    return predicted_tst, dur_tst, n_classes
+    return predicted_tst, dur_tst
 
 def calculate_bds_params(X, V, y, segment_count, window_size, model, cost_ratio):
     # This function loses 1 window of data at the end of the trial because of how it functions.
@@ -257,10 +253,4 @@ def async_performance_test(subject, p_value_threshold, max_sub_trial_length):
 
                 j += step_size
 
-
-    
-    dur_tst = dur_tst.mean(axis=1)
-
-    n_classes = V_test.shape[1]
-
-    return predicted_tst, dur_tst, n_classes
+    return predicted_tst, dur_tst

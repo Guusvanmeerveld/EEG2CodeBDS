@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from matplotlib.legend_handler import HandlerTuple
 from scipy.stats import norm
 import numpy as np
 
@@ -9,7 +10,7 @@ import math
 import eeg2code
 import utils
 
-from sklearn.metrics import precision_score, recall_score, confusion_matrix, accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 keras.config.disable_interactive_logging()
 
@@ -62,34 +63,51 @@ def plot_dist_param(b0_, b1_, s0_, s1_, eta_, time_intervals, label, ax):
     ax.grid(True, alpha=0.4)
     ax.legend(loc='upper left')
 
-def plot_metric(ax, metrics, metric_name, y_range=[0, 1]):
-    subjects, cost_ratios = metrics.shape
+def plot_metric(ax, metrics, parameter_list, parameters_name, metric_name, y_range=[0, 1]):
+    metrics = metrics.transpose()
 
-    bar_width = 0.8 / cost_ratios
+    parameters, subjects = metrics.shape
+
+    bar_width = 0.8 / parameters
     in_between_bar = 0.5
 
     x = np.arange(subjects)
 
-    # print(cost_ratios)
+    ax.grid(True, alpha=0.4)
+
+    for parameter in range(parameters):
+        rects = ax.bar(x + parameter * bar_width, metrics[parameter], width=bar_width, label=str(parameter_list[parameter]))
     
-    # Plot sub-bars for each subject
-    for subject in range(subjects):
-        for i in range(cost_ratios):
-            # print(subject, metrics[subject, i])
-            ax.bar(x[subject] + i * bar_width, metrics[subject, i], width=bar_width, label=i)
-    
-    # Draw the horizontal line for average accuracy
-    # metric_mean = np.mean(metrics)
-    # ax.hlines(metric_mean, -0.5, subjects - 0.5, linestyle='--', color="k", alpha=0.5)
-    
-    # Customize the axes
     ax.set_ylim(y_range[0], y_range[1])
     # ax.set_xlabel("Subject")
     ax.set_ylabel(metric_name)
-    # ax.set_title(f"Average {metric_name} {metric_mean:.2f}")
-    # ax.legend()
+    ax.set_xticks(x + bar_width * (parameters / 2), [f'Sub {i + 1}' for i in range(subjects)])
 
-    plt.xticks(x + bar_width * (cost_ratios / 2), [f'Subj {i + 1}' for i in range(subjects)])
+    ax.legend(loc='center left', title=parameter_name, ncols=2, fancybox=True, bbox_to_anchor=(1, 0.5))
+
+EPS = math.pow(10, -100)
+
+def stopping_confusion_counts(y_true, y_pred, early_stopped):
+    """
+    TP/FP/FN/TN volgens jouw stopping-definitie (zoals je eerder beschreef):
+      - 'positief' = trial is gestopt vóór sig_len (early stop)
+      - TP: early stop én correct
+      - FP: early stop én incorrect
+      - FN: niet early stop (forced) én correct
+      - TN: niet early stop (forced) én incorrect
+    """
+    correct = (y_pred == y_true)
+    
+    tp = int(np.sum( early_stopped &  correct))
+    fp = int(np.sum( early_stopped & ~correct))
+    fn = int(np.sum(~early_stopped &  correct))
+    tn = int(np.sum(~early_stopped & ~correct))
+    precision   = tp / (tp + fp + EPS)
+    recall      = tp / (tp + fn + EPS)
+    specificity = tn / (tn + fp + EPS)
+    f1          = (2 * precision * recall) / (precision + recall + EPS)
+
+    return precision, recall, f1, specificity
 
 # 125 ms segments for BDS
 segment_time = 0.125
@@ -139,13 +157,11 @@ cost_ratios = 9
 
 # plt.savefig("./eeg2code_bds_dist.png", dpi=300)
 
-# for subject in (7, 8):
-#     for i, cost_ratio in enumerate([10]):
-#         predicted, duration, n_classes = eeg2code.bds_performance_test(subject, cost_ratio, segment_time)
+# for subject in np.arange(subjects):
+#     for cost_ratio in np.logspace(-4, 4, num=cost_ratios):
+#         predicted, duration = eeg2code.bds_performance_test(subject, cost_ratio, segment_time)
 
-#         np.save(save_path + "predicted-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy", predicted)
-#         np.save(save_path + "duration-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy", duration)
-#         np.save(save_path + "n_classes-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy", n_classes)
+#         np.savez(f"{bds_save_path}{str(subject + 1)}-{cost_ratio}.npz", predicted=predicted, duration=duration)
 
 stopping_time = np.zeros((subjects, cost_ratios))
 accuracy = np.zeros((subjects, cost_ratios))
@@ -155,45 +171,145 @@ f_score = np.zeros((subjects, cost_ratios))
 specificity = np.zeros((subjects, cost_ratios))
 
 for subject in range(subjects):
-    _, (_, _, y_train), _, _, _, _ = utils.load_nagelspuler_dataset("data/nagelspuler/offline/VP" + str(subject + 1) + ".mat")
+    _, (_, _, y_train), stimulation_time, _, _, _ = utils.load_nagelspuler_dataset("data/nagelspuler/offline/VP" + str(subject + 1) + ".mat")
 
     true_y = y_train[:(7 * 56)]
 
     for i, cost_ratio in enumerate(np.logspace(-4, 4, num=cost_ratios)):
-        predicted = np.load(bds_save_path + "predicted-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy")
-        duration = np.load(bds_save_path + "duration-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy")
-        n_classes = np.load(bds_save_path + "n_classes-" + str(subject + 1) + "-" + str(cost_ratio) + ".npy")
+        data = np.load(f"{bds_save_path}{subject + 1}-{cost_ratio}.npz")
 
-        predicted_y = np.hstack(predicted)
+        stopped_early = ((np.hstack(data["duration"]) - 1.75) >= 0)
+
+        duration = np.mean(data["duration"], axis=1)
+
+        predicted_y = np.hstack(data["predicted"])
 
         accuracy[subject, i] = accuracy_score(true_y, predicted_y)
-        precision[subject, i] = precision_score(true_y, predicted_y, average='micro')
-
-        # tn, fp, fn, tp = confusion_matrix(true_y, predicted_y).ravel()
-        # specificity[subject, i] = tn / (tn+fp)
-
-        recall[subject, i] = recall_score(true_y, predicted_y, average='micro')
-        f_score[subject, i] = f1_score(true_y, predicted_y, average='micro')
-
         stopping_time[subject, i] = np.mean(duration)
+
+        precision_matrix, recall_matrix, f1_matrix, specificity_matrix = stopping_confusion_counts(true_y, predicted_y, stopped_early)
+
+        precision[subject, i] = precision_matrix
+        recall[subject, i] = recall_matrix
+        f_score[subject, i] = f1_matrix
+        specificity[subject, i] = specificity_matrix
+
+        # precision[subject, i] = precision_score(true_y, predicted_y, average='macro')
+        # recall[subject, i] = recall_score(true_y, predicted_y, average='macro')
+        # f_score[subject, i] = f1_score(true_y, predicted_y, average='macro')
 
 fig, ax = plt.subplots(6, 1, figsize=(15, 12), sharex=True, constrained_layout=True)
 
-plot_metric(ax[0], accuracy, "Accuracy")
-plot_metric(ax[1], stopping_time, "Stopping Time", [0, 1.75])
-plot_metric(ax[2], precision, "Precision")
-plot_metric(ax[3], recall, "Recall")
-plot_metric(ax[4], f_score, "F-score")
-plot_metric(ax[5], specificity, "Specificity")
+parameter_name = "Cost ratios"
+parameter_list = np.logspace(-4, 4, num=cost_ratios)
+
+plot_metric(ax[0], accuracy, parameter_list, parameter_name, "Accuracy")
+plot_metric(ax[1], stopping_time, parameter_list, parameter_name, "Stopping Time", [0, 1.75])
+plot_metric(ax[2], precision, parameter_list, parameter_name, "Precision")
+plot_metric(ax[3], recall, parameter_list, parameter_name, "Recall")
+plot_metric(ax[4], f_score, parameter_list, parameter_name, "F-score")
+plot_metric(ax[5], specificity, parameter_list, parameter_name, "Specificity")
 
 plt.savefig("./bds-perf-metrics-eeg2code-classifier.png", dpi=300)
 plt.show()
 
+bds_accuracy = accuracy.mean(axis=0)
+bds_precision = precision.mean(axis=0)
+bds_accuracy_std = accuracy.std(axis=0)
+bds_precision_std = precision.std(axis=0)
+
+bds_stopping_time = stopping_time.mean(axis=0)
+
+p_value_thresholds = 7
+
+# for subject in range(subjects):
+#     for p_value_threshold in np.arange(p_value_thresholds):
+#         p_value_threshold = 1 * math.pow(10, -(5 * (p_value_threshold + 1)))
+
+#         predicted, duration = eeg2code.async_performance_test(subject, p_value_threshold, 0.75)
+
+#         np.savez(f"{async_stopping_save_path}{str(subject + 1)}-{p_value_threshold}.npz", predicted=predicted, duration=duration)
+
+stopping_time = np.zeros((subjects, p_value_thresholds))
+accuracy = np.zeros((subjects, p_value_thresholds))
+precision = np.zeros((subjects, p_value_thresholds))
+recall = np.zeros((subjects, p_value_thresholds))
+f_score = np.zeros((subjects, p_value_thresholds))
+specificity = np.zeros((subjects, p_value_thresholds))
+
 for subject in range(subjects):
-    for p_value_threshold in np.arange(5):
+    _, (_, _, y_train), _, _, fs, _ = utils.load_nagelspuler_dataset("data/nagelspuler/offline/VP" + str(subject + 1) + ".mat")
+
+    true_y = y_train
+
+    for i, p_value_threshold in enumerate(np.arange(p_value_thresholds)):
         p_value_threshold = 1 * math.pow(10, -(5 * (p_value_threshold + 1)))
-        # print(p_value_threshold)
 
-        predicted, duration, n_classes = eeg2code.async_performance_test(subject, p_value_threshold, 0.75)
+        data = np.load(f"{async_stopping_save_path}{subject + 1}-{p_value_threshold}.npz")
 
-        np.savez(f"{async_stopping_save_path}{str(subject + 1)}-{p_value_threshold}.npz", predicted, duration, n_classes)
+        stopped_early = ((np.hstack(data["duration"]) - (1.75 - (25 / fs))) >= 0)
+
+        duration = np.mean(data["duration"], axis=1)
+
+        predicted_y = np.hstack(data["predicted"])
+
+        accuracy[subject, i] = accuracy_score(true_y, predicted_y)
+        stopping_time[subject, i] = np.mean(duration)
+
+        precision_matrix, recall_matrix, f1_matrix, specificity_matrix = stopping_confusion_counts(true_y, predicted_y, stopped_early)
+
+        precision[subject, i] = precision_matrix
+        recall[subject, i] = recall_matrix
+        f_score[subject, i] = f1_matrix
+        specificity[subject, i] = specificity_matrix
+
+        # precision[subject, i] = precision_score(true_y, predicted_y, average='macro')
+        # recall[subject, i] = recall_score(true_y, predicted_y, average='macro')
+        # f_score[subject, i] = f1_score(true_y, predicted_y, average='macro')
+
+async_accuracy = accuracy.mean(axis=0)
+async_precision = precision.mean(axis=0)
+async_accuracy_std = accuracy.std(axis=0)
+async_precision_std = precision.std(axis=0)
+
+async_stopping_time = stopping_time.mean(axis=0)
+
+fig, ax = plt.subplots(2, 1, figsize=(15, 12), constrained_layout=True)
+
+ax[0].plot(bds_stopping_time, bds_accuracy, color='blue', marker='o', label="BDS Adaptation")
+ax[0].fill_between(bds_stopping_time, bds_accuracy - bds_accuracy_std, bds_accuracy + bds_accuracy_std, color='blue', alpha=0.2)
+
+ax[0].plot(async_stopping_time, async_accuracy, color='orange', marker='o', label="Async Stopping")
+ax[0].fill_between(async_stopping_time, async_accuracy - async_accuracy_std, async_accuracy + async_accuracy_std, color='orange', alpha=0.2)
+
+ax[0].set_xticks(np.arange(0, 1.75, step=0.25))
+ax[0].set_xlim((0, 1.75))
+ax[0].set_xlabel("Average stopping time (s)")
+
+ax[0].set_yticks(np.arange(0, 1, step=0.25))
+ax[0].set_ylim((0, 1))
+ax[0].set_ylabel("Average classification accuracy")
+
+ax[0].legend()
+
+ax[0].grid()
+
+ax[1].plot(bds_stopping_time, bds_precision, color='blue', marker='o', label="BDS Adaptation")
+ax[1].fill_between(bds_stopping_time, bds_precision - bds_precision_std, bds_precision + bds_precision_std, color='blue', alpha=0.2)
+
+ax[1].plot(async_stopping_time, async_precision, color='orange', marker='o', label="Async Stopping")
+ax[1].fill_between(async_stopping_time, async_precision - async_precision_std, async_precision + async_precision_std, color='orange', alpha=0.2)
+
+ax[1].set_xticks(np.arange(0, 1.75, step=0.25))
+ax[1].set_xlim((0, 1.75))
+ax[1].set_xlabel("Average stopping time (s)")
+
+ax[1].set_yticks(np.arange(0, 1, step=0.25))
+ax[1].set_ylim((0, 1))
+ax[1].set_ylabel("Average classification precision")
+
+ax[1].legend()
+
+ax[1].grid()
+fig.savefig("./accuracy-precision-stopping-time-comparison.png", dpi=300)
+plt.show()
